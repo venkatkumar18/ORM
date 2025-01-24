@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+
+{% block content %}
+    {% for restaurant in restaurants %}
+        <p>{{restaurant.name}}</p>
+        <ul>
+            {% for rat in restaurant.rating.all %}
+                <li>
+                    {{rat.rating}}
+                </li>
+            {% endfor %}
+        </ul>
+    {% endfor %}
+
+    {% for sale in sales %}
+        <p>{{sale.restaurant.name}} {{sale.income}}  </p> 
+    {% endfor %}
+{% endblock %}
