@@ -8,7 +8,6 @@ from django.db.models.functions import Lower
 # Sales
 
 def custom_validator(value):
-    print(dir(value))
     if not value.lower().startswith('a'):
         raise ValidationError("Field Value Must Begin With A/a")
 
@@ -54,3 +53,15 @@ class Sale(models.Model):
     income = models.DecimalField(max_digits=8, decimal_places=2)
     datetime = models.DateTimeField()
     
+    
+class Staff(models.Model):
+    name = models.CharField(max_length=255)
+    restaurant = models.ManyToManyField(Restaurant, through='StaffRestaurant')
+    
+    def __str__(self):
+        return self.name
+    
+class StaffRestaurant(models.Model):
+    staff = models.ForeignKey(Staff, on_delete=models.CASCADE)
+    restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE)
+    salary = models.FloatField()

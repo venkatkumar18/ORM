@@ -9,6 +9,9 @@
 5) 'objects' is a default manager to the model
 6) When we have validators in the model field during .save() it will not be triggered, we need to run full_clean() method to check it before save().
 7) queryset.update() is a bulk operation it will not call the .save() method so it not trigerr the pre and post save signals.
+8) Prefetch related suitable for many to one (when related model is trying to access the foreign key of a child model). Select related is suitable for one to many (when child model is trying to access the fields of the foreign key model).
+9) The Prefetch function is used to add some filters in the prefetched related model instead of getting all the entries matching the parent model id.
+10) Annotates is used to add a new field, we can use the aggregrate function inside it which will create GROUP BY clause in SQL.
 
 *) ORM
     * Restaurant.objects.all()                            - ALL RECORDS
@@ -50,4 +53,97 @@
                                     - WE CAN ADD THE DEFAULT ORDERING AND GET_LATEST_BY IN MODEL META
     * Rating.objects.filter(restaurant__name__startswith='C')  - FOREIGN KEY FIELD FILTER WITH LOOKUPS
       Sale.objects.filter(restaurant__restaurant_type="CH")    - FOREIGN KEY FIELD FILTER
+                                    - THESE FOREIGN KEY FILTERS WILL HAVE A INNER JOIN QUERY TO LINK THE TABLES
     
+    * Prefetch Related
+        N+1 Problem - For each N recrods(restaurant) one query will be execcuted to get the rating. To get the restaurant.all() one query is executed. So it is N+1 query.
+
+        Usual Query For 14 restaurant records (Total query executed - 15)
+            restaurants = Restaurant.objects.all()
+            for restaurant in restaurants:
+                print(restaurant.name)
+                for rat in restaurant.rating.all():
+                    print(rat.rating)
+                print()
+        
+
+        Optimized query using prefetch related (total query executed - 2) Uses Inner Join
+            restaurant = Restaurant.objects.only('name').prefetch_related('rating')
+            for restaurant in restaurants:
+                print(restaurant.name)
+                for rat in restaurant.rating.all():
+                    print(rat.rating)
+                print()
+    * Select Related
+        Usual Query for 100 sales record (Total query executed 101) 1 to get all sales and remainig 100 for getting restaurant name.
+            sales = Sale.objects.all()
+            for sale in sales:
+                print(sale.restaurant.name, sale.income)
+        
+        Optimized query using select_related (Total query 1) Uses Left Outer Join
+            sales = Sale.objects.only('income','restaurant__name').select_related('restaurant')
+            for sale in sales:
+                print(sale.restaurant.name, sale.income)
+    * Prefetch
+        WITHOUT PREFETCH (which will select all the matching sale and rating query based on restaurant id)
+            restaurant = Restaurant.objects.prefetch_related('rating','sale').filter(rating__rating=5). \
+                            annotate(total_income=Sum('sale__income'))
+            for res in restaurant:
+                print(res.name, res.total_income)
+        
+        WITH PREFETCH (PUT A WHERE CLAUSE IN SALES QUERY TO FILTER RECORDS BASED ON RESTAURANT ID AND DATETIME)
+            month_ago = timezone.now() - timezone.timedelta(days=31)
+            sales_qs = Prefetch('sale', Sale.objects.filter(datetime__gte=month_ago))
+    
+            restaurant = Restaurant.objects.prefetch_related('rating',sales_qs).filter(rating__rating=5) \
+        .                   annotate(total_income=Sum('sale__income'))
+
+    * M2M
+        WE CAN CREATE M2M FIELD ON A TABLE, THIS WILL CREATE A JUNCTION TABLE WHICH HAS THE ID FIELD TWO FOREIGN KEYS OF THE RESPECTIVE MODELS. THIS TABLE WILL BE AUTOMATICALLY CREATED, IF WE WANT TO ADD SOME OTHER FIELDS THEN WE CAN SPECIFY 'THROUGH' IN THE M2M FIELD AND ADD A CLASS, KINDLY REFER StaffRestaurant CLASS. WITH StaffRestaurant WE CAN PERFORM ALL ORM OPERATION LIKE REGULAR TABLE.
+
+        staff.restaurant.all()              - RETURNS ALL THE RESTAURANT ENTRY FOR THAT STAFF
+        staff.restaurant.add(restaurant, through_defaults={'salary': 50})    - ADD A M2M ENTRY IN THE M2M TABLE.
+        staff.restaurant.count()            - RETURNS THE TOTAL COUNT OF RESTAURANT FOR A STAFF
+        staff.restaurant.set(Restaurant.objects.all()[:5], through_defaults={'salary': 78})     - INSERT                            MULTIPLE RECORDS WHEN GIVEN IN QUERYSET
+
+        staff.restaurant.clear()            - DELETES ALL THE ENTRY IN THE JUNCTION TABLE FOR A STAFF
+        staff.restaurant.remove(restaurant) - REMOVES A PARTICULAR RESTAURANT IN THE TABLE
+        staff.restaurant.filter(restaurant_type=Restaurant.TypeChoices.CHINESE)     - FILTER RECORDS
+        restaurant.staff_set.all()          - M2M FIELD WAS ADDED IN STAFF MODEL, SO WE ACCESSED IT DIRECTLY FOR RELATED MODEL WE CAN USE THE {model}_set TO ACCESS IT.
+
+        WITHOUT PREFETCH (For 10 jobs, total queries = 21 (N*2 + 1))
+            jobs = StaffRestaurant.objects.all()
+            for job in jobs:
+                print(job.staff.name, end='  -   ')
+                print(job.restaurant.name)
+
+        USING PREFETCH (For 10 jobs, total queries = 3)
+
+            jobs = StaffRestaurant.objects.prefetch_related('staff','restaurant')
+            for job in jobs:
+                print(job.staff.name, end='  -   ')
+                print(job.restaurant.name)
+    
+    *  Restaurant.objects.values('name', 'website')       - RETURNS DICTIONARY OF VALUES IN A LIST.
+       Restaurant.objects.values(capital_name=Upper('name'))  - CAPITALIZE THE NAME FIELD
+       Restaurant.objects.values('rating__rating')      - WE CAN USE RELATED MODEL FIELD ALSO IN VALUES.
+       Restaurant.objects.values_list('name',flat=True) - VALUES_LIST WILL RETURN THE RESULT IN LIST OF TUPLES IF WE SPECIFY ONLY ONE FIELD THEN WE CAN USE FLAT OPTION TO RETURN IT A SINGLE LIST WITH ALL VALUES.
+
+       Restaurant.objects.aggregate(unique_hotels=Count('name'))    - AGGREGATE FUNCTION COUNT
+       Sale.objects.annotate(min=Min('income'), 
+        max=Max('income'),
+        avg=Avg('income'),
+        sum=Sum('income')).values('min','max','avg','sum')      - GROUP AGGREGATE FUNCTIONS.
+    
+       Restaurant.objects.annotate(name_length=Length('name')).filter(name_length__gte=10).order_by('-name_length')         - ANNOTATE WILL ADD A FIELD TO EVERY INSTANCE, WE CAN ACCESS IT, WE CAN USER THE ANNOTATED FIELD IN FILTER AND IN ORDER_BY CLAUSE. 
+
+       concatenation_format = Concat('name',Value(' : [Rating '), 'rating__rating', Value(']'), output_field=CharField())
+       restaurant = Restaurant.objects.annotate(message=concatenation_format)       - WE CAN CREATE A FORMAT OF MESSAGE USING CONCAT AND USING IT IN ANNOTATE
+
+
+       Restaurant.objects.annotate(sum=Sum('sale__income')).values('name','sum')    - USING ANNOTATE WILL CREATE A "CAST(SUM("core_sale"."income") AS NUMERIC) AS "sum" QUERY AND FORM A GROUP BY CLAUSE WITH ALL THE FIELDS IN RESTAURANT MODEL.
+
+       Restaurant.objects.values('name').annotate(sum=Sum('sale__income')).filter(sum__gte=500)     - USING ANNOTATE AFTER VALUE WILL FORM A GROUP BY CLAUSE ONLY ON THAT FIELD, AND USING FILTER WILL CREATE HAVING CLAUSE.
+
+        Restaurant.objects.annotate(sum=Sum('sale__income')).values('sum')
+        restaurant.aggregate(output=Avg('sum'))     - WE CAN AGGREGATE THE VALUE FROM A ANNOTATED FIELD.
