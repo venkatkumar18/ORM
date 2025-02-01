@@ -28,6 +28,8 @@ class Restaurant(models.Model):
     longitude = models.FloatField(validators=[MinValueValidator(-180),MaxValueValidator(180)])
     latitude = models.FloatField(validators=[MinValueValidator(-90),MaxValueValidator(90)])
     restaurant_type = models.CharField(max_length=2, choices=TypeChoices.choices)
+    capacity = models.PositiveIntegerField(null=True, blank=True)
+    nickname = models.CharField(max_length=255, null=True)
     
     class Meta():
         ordering = [Lower("name")]
@@ -51,6 +53,7 @@ class Rating(models.Model):
 class Sale(models.Model):
     restaurant = models.ForeignKey(Restaurant, on_delete=models.SET_NULL, null=True, related_name='sale')
     income = models.DecimalField(max_digits=8, decimal_places=2)
+    expenditure = models.DecimalField(max_digits=8,decimal_places=2)
     datetime = models.DateTimeField()
     
     

@@ -147,3 +147,118 @@
 
         Restaurant.objects.annotate(sum=Sum('sale__income')).values('sum')
         restaurant.aggregate(output=Avg('sum'))     - WE CAN AGGREGATE THE VALUE FROM A ANNOTATED FIELD.
+    
+    * F and Q expressions
+
+        Rating.objects.first()
+        rating.rating = F('rating') + 1
+        rating.save()     - WE WILL SPECIFY THE FIELD AND DO OPERATION ON IT IN SQL, THE VALUE WILL NOT BE PULLED IN PYTHON MEMORY
+
+        Rating.objects.update(rating=F('rating') * 2)       - UPDATES ALL THE RATING * 2
+        sales = Sale.objects.all()
+        for sale in sales:
+            sale.expenditure = random.uniform(5,100)
+        Sale.objects.bulk_update(sales, ['expenditure'])    - BULK UPDATE ALL THE SALES MODEL IN A SINGLE QUERY
+        Sale.objects.filter(income__gte=F('expenditure'))   - USING F EXPRESSION IN FILTER QUERY
+        Sale.objects.annotate(profit=F('income') - F('expenditure'))    - USING F IN ANNOTATE
+        
+        Sale.objects.aggregate(
+        profit=Count('id', filter=Q(income__gt=F('expenditure'))),
+        loss=Count('id', filter=Q(income__lt=F('expenditure')))
+        )       - USING F IN AGGREGATE, THIS WILL GIVE THE TOTAL NUMBER OF PROFIT AND LOSS COUNTS.
+
+
+        rating = Rating.objects.first()
+        print(rating.rating)
+        rating.rating = F('rating') + 1
+        rating.save()
+        
+        print(rating.rating)
+        rating.refresh_from_db()
+        print(rating.rating)            - OUTPUT --> 2, F(rating) + Value(1) ,3. REFRESHING IT WILL GET THE VALUE IN PYTHON MEMORY.
+
+
+        type_filter = Q(restaurant_type=it) | Q(restaurant_type=me)
+        recently_opened = ~Q(date_opened__gte=timezone.now() - timezone.timedelta(days=40))
+        restaurant = Restaurant.objects.filter(type_filter & recently_opened)       - WE CAN SPECIFY AND, NOT, NOT CONDITION IN THE FILTER EXPRESSION. USING | & ~ ON Q EXPRESSIONS.
+
+
+        name_filter = Q(restaurant__name__regex='[0-9]+')
+        profit_filter = Q(income__gt=F('expenditure'))
+        sales = Sale.objects.select_related('restaurant').filter(name_filter | profit_filter)   - COMBINE AND, OR CONDITION USIN Q EXPRESSION.
+    
+    * COALESCE
+        Restaurant.objects.filter(capacity__isnull=False)       - FILTER BY ISNULL LOOKUP
+        Restaurant.objects.aggregate(total_sum=Coalesce(Sum(F('capacity')), 0))     - WILL RETURN NON NULL VALUE IF THE SUM IS NONE THEN WILL RETURN THE DEFAULT VALUE 0.
+
+        Restaurant.objects.aggregate(total_sum=Sum(F('capacity'), default=0.0))     - WE CAN REPLICATE THE SAME BEHAVIOR USING DEFAULT PARAM TO RETURN NON NULL VALUE. BUT THE SQL WILL USE COALESCE ONLY IN THE BACKGROUND.
+
+        Restaurant.objects.annotate(name_param=Coalesce(F('nickname'), F('name'))).values_list('name_param', flat=True)         - IT WILL RETURN NICKNAME PARAM OR ELSE WILL RETURN NAME PARAM.
+
+    * IF/ELSE CONDITIONAL STATEMENTS
+
+        it = Restaurant.TypeChoices.ITALIAN
+        restaurant = Restaurant.objects.annotate(
+            is_italian=Case(
+                When(restaurant_type=it, then=True),
+                default=False
+            )
+        )
+        restaurant.filter(is_italian=True)      - WE CAN ADD MULTIPLE IF/ELSE CONDITION AND ASSIGN IT TO A VARIABLE USING ANNOTATE AND WE CAN FILTER IT BY THE RESULT.
+
+        sales = Restaurant.objects.annotate(nsales=Count('sale__id'))
+        sales = sales.annotate(popular=Case(
+            When(nsales__gte=10, then=True),
+            default=False
+        )).values('nsales','popular')
+        print(sales.filter(popular=True))       - ANOTHER EXAMPLE OF USING TWO ANNOTATES.
+
+
+        restaurant = Restaurant.objects.annotate(
+        avg=Avg('rating__rating'),
+        total=Count('rating__id')
+        )
+        restaurant = restaurant.annotate(
+            rating_bucket=Case(
+                When(avg__gt=3.5, total__gt=1, then=Value("High Rated")),
+                When(avg__range=(2,3.5), total__gt=1, then=Value("Average Rated")),
+                When(avg__lt=2.5, then=Value('Low Rated'))
+            )
+        ).values('name','avg','total','rating_bucket')      - WE CAN HAVE MULTIPLE CONDITION AND FRAME A VALUE FOR THE RESULT AND WE CAN FILTER IT BASED ON THAT.
+
+
+
+        types = Restaurant.TypeChoices
+        asian = Q(restaurant_type=types.CHINESE) | Q(restaurant_type=types.INDIAN)
+        europe = Q(restaurant_type=types.GREEK) | Q(restaurant_type=types.ITALIAN)
+        na = Q(restaurant_type=types.MEXICAN)
+        
+        restaurant = Restaurant.objects.annotate(
+            continent=Case(
+                When(asian, then=Value('Asian')),
+                When(europe, then=Value('Europe')),
+                When(na, then=Value("North America")),
+                default=Value("Not Available")
+            )
+        ).values('name','restaurant_type','continent')      - TO ADD A CONTINENT DATA BASED ON RESTAURANT TYPE
+
+
+        dates = []
+        first_date = Sale.objects.aggregate(Min=Min('datetime'))['Min']
+        last_date = Sale.objects.aggregate(Max=Max('datetime'))['Max']
+        count = itertools.count()
+        while (dt := first_date + timezone.timedelta(days=10 * next(count)) ) <= last_date:
+            dates.append(dt)
+        whens = [
+            When(datetime__range=(dt, dt + timezone.timedelta(days=10)), then=Value(dt.date()))
+            for dt in dates
+        ]
+        cases = Case(
+            *whens,
+            output_field=CharField()
+        )
+        sales = Sale.objects.annotate(
+            daterange=cases
+        ).values('daterange').annotate(total_sales=Sum('income'))
+            
+        print(sales)            - TO GET THE TOTAL SALES FOR EVERY 10 DAYS FROM FIRST SALE TO LAST SALE
