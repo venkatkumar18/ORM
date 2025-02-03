@@ -3,6 +3,9 @@ from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from django.db.models.functions import Lower
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+
 # Restaurant
 # Rating
 # Sales
@@ -30,6 +33,7 @@ class Restaurant(models.Model):
     restaurant_type = models.CharField(max_length=2, choices=TypeChoices.choices)
     capacity = models.PositiveIntegerField(null=True, blank=True)
     nickname = models.CharField(max_length=255, null=True)
+    comments = GenericRelation("Comment",related_query_name='restaurant')
     
     class Meta():
         ordering = [Lower("name")]
@@ -46,6 +50,7 @@ class Rating(models.Model):
     restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE, related_name='rating')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1),MaxValueValidator(5)])
+    comments = GenericRelation("Comment", related_query_name="rating")
     
     def __str__(self):
         return f"Rating: {self.rating}"
@@ -68,3 +73,27 @@ class StaffRestaurant(models.Model):
     staff = models.ForeignKey(Staff, on_delete=models.CASCADE)
     restaurant = models.ForeignKey(Restaurant, on_delete=models.CASCADE)
     salary = models.FloatField()
+   
+ 
+class Product(models.Model):
+    name = models.CharField(max_length=200)
+    number_of_stock = models.PositiveSmallIntegerField()
+    
+    def __str__(self):
+        return self.name
+
+class Order(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    no_of_items = models.PositiveSmallIntegerField()
+    
+    def __str__(self):
+        return f"{self.no_of_items} X {self.product.name}"
+    
+class Comment(models.Model):
+    text = models.TextField()
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.PositiveIntegerField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+    
+    def __str__(self):
+        return self.text
