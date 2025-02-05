@@ -12,6 +12,7 @@
 8) Prefetch related suitable for many to one (when related model is trying to access the foreign key of a child model). Select related is suitable for one to many (when child model is trying to access the fields of the foreign key model).
 9) The Prefetch function is used to add some filters in the prefetched related model instead of getting all the entries matching the parent model id.
 10) Annotates is used to add a new field, we can use the aggregrate function inside it which will create GROUP BY clause in SQL.
+11) We can generate an ER diagram of our models using django-extensions package, with this command - python manage.py graph_models -a > er_diagram.dot. This will create a dot file in online check for dot file to image converter. This will give the ER diagram of our models. We can configure for specific model in settings.py file kindly check the docs for configuration.
 
 *) ORM
     * Restaurant.objects.all()                            - ALL RECORDS
@@ -262,3 +263,101 @@
         ).values('daterange').annotate(total_sales=Sum('income'))
             
         print(sales)            - TO GET THE TOTAL SALES FOR EVERY 10 DAYS FROM FIRST SALE TO LAST SALE
+
+    
+    * Subquery, OuterRef, Exists.
+        IN WHERE CONDITION WHEN WE PUT A BRACKET () AND INCLUDE ANOTHER SQL CONDITION INSIDE IT IS CALLED AS SUBQUERY.
+
+          restaurant = Restaurant.objects.filter(restaurant_type__in=[italian, chinese])
+          Sale.objects.filter(restaurant__in=Subquery(restaurant.values('pk'))).count()  -  IN SALES TABLE      WHERE CONDITION A (A SQL CONDITION WILL EXECUTED TO GIVE THE IDS OF THE RESTAURANT). THIS IS EQUIVALENT TO THIS QUERY - Sale.objects.filter(restaurant__restaurant_type__in=[italian,chinese]) BUT THIS QUERY WILL FORM A JOIN.
+
+        sale = Sale.objects.filter(restaurant_id=OuterRef('pk')).order_by('-datetime')
+        restaurant = Restaurant.objects.annotate(
+            last_sale=Subquery(sale.values('income')[:1]),
+            last_expenditure=Subquery(sale.values('expenditure')[:1]),
+            profit= F('last_sale') - F('last_expenditure')
+        ).values('name','last_sale', 'last_expenditure', 'profit').order_by('id')     -  THIS CODE MEANING IS IN SELECT QUERY ITSELF WE ARE REFERRING THE FROM TABLES PROPERTY. 
+        SAMPLE SQL EQUIVALENT IS 
+        SELECT name, 
+        (select income FROM core_sale where restaurant_id = core_restaurant.id order by datetime DESC LIMIT 1) AS last_sale  
+        FROM core_restaurant
+        SO FOR EVERY RESTAURANT RECORD THIS SUBQUERY NEED TO BE EXECUTED TO GET THE RESULT. 
+            
+        sale = Sale.objects.filter(restaurant_id=OuterRef('id'), income__gt=85)
+        restaurant = Restaurant.objects.filter(Exists(sale))        - WE CAN USE EXISTS IN PLACE FOR SUBQUERY IT RETURN BOOLEAN VALUE FOR THE CONDITION AND RETURNS ONLY THE RESTAURANT THAT MATCHES THE CONDITION.
+
+
+    * Transactions
+        DJANGO WORKS IN AUTO COMMIT MODE, WHENEVER A ORM QUERIES ARE EXECUTED IT WILL BE COMMITTED IN A DATABASE, BUT IN SOME CASE WE HAVE DEPENDENCIES BETWEEN TWO MODELS, LIKE IF WE SAVE A MODEL SOME OPERATION NEED TO BE PERFORMED IN THE OTHER MODEL, IF EXCEPTION IS RAISED THE SECOND MODEL SAVE IS CANCELED BUT THE FIRST SAVE IS COMMITTED IN DB WE WANT TO RESTRICT IT.
+
+        WITHOUT EXCEPTION:
+            product1 = Product.objects.get(name='Book')
+            order = Order.objects.create(product=product1, no_of_items=3)
+            product1.number_of_stock -= order.no_of_items
+            product1.save()
+
+        WITH EXCEPTION:
+            product1 = Product.objects.get(name='Book')
+            order = Order.objects.create(product=product1, no_of_items=3)
+            raise Exception("raised after save operation")
+            product1.number_of_stock -= order.no_of_items
+            product1.save()     - HERE ORDER WILL BE SAVED BUT THE PRODUCT WILL NOT BE SAVED, ONE CHANGE IS HERE NUMBER_OF_STOCK IS POSITVE FIELD BUT WHEN WE SUBTRACT IF IT IS NEGATIVE THEN IT WILL RAISE AN EXCEPTION.
+        
+        SOLUTION:
+            with transaction.atomic():
+                product1 = Product.objects.get(name='Book')
+                order = Order.objects.create(product=product1, no_of_items=3)
+                
+                raise Exception("raised after save operation")
+                product1.number_of_stock -= order.no_of_items
+                product1.save()     - THIS CODE WILL NOT ALLOW ORDER TO BE SAVED IN DATABASE ONLY AT THE END OF THE TRANSACTION THE COMMIT WILL OCCUR. IF EXCEPTION OR SYSTEM CRASH OCCURS THEN ALL THE CHANGE WILL BE ROLLBACKED. IT WILL CREATE A "BEGIN" AND AT THE END WILL HAVE A "COMMIT" SQL STATEMENTS
+            
+        on_commit:
+            with transaction.atomic():
+                product1 = Product.objects.get(name='Book')
+                order = Order.objects.create(product=product1, no_of_items=4)
+                product1.number_of_stock -= order.no_of_items
+                product1.save()
+            transaction.on_commit(success_method)       - ONLY WHEN THE TRANSACTION IS SUCCESS THE ON_COMMIT PARAM METHOD WILL BE EXECUTED.
+
+        select_for_update():
+            with transaction.atomic():
+                product = Product.objects.select_for_update().get(id=1)  
+            
+            - THIS WILL LOCK THIS PARTICULAR ROW TILL THE END OF THE TRANSACTION, THE OTHER CALLS CAN ABLE TO READ THIS PRODUCT BUT CAN'T MODIFY IT, THIS WILL FIX CONCURRENCY ISSUES WHEN MULTIPLE CALLS UPDATE THE SAME RECORD.
+            
+    * Content-Type
+        content_type = ContentType.objects.get(app_label='core', model='restaurant')
+        dynamic_model = content_type.model_class()
+        dynamic_entry = content_type.get_object_for_this_type(name='Bombay Bustle')
+        content_type_model = ContentType.objects.get_for_model(Restaurant)
+        print(dynamic_entry)        - THIS PRINTS THE RESTAURANT ENTRY
+        print(dynamic_model.objects.first())        - THIS WILL PRINT ALL THE ENTRIES IN THE RESTAURANT MODEL.
+        print(content_type_model.app_label, content_type_model.model)   - WITH A MODEL CLASS WE CAN GET THE CONTENT TYPE MODEL INSTANCE OF IT.
+
+    * Generic Foreign Key
+        WHEN WE WANT A SINGLE FOREIGN KEY AND REFERENCE MULTIPLE MODELS, THEN WE CAN USE GENERIC FOREIGN KEY, REFER COMMENTS MODEL, OVER THERE WE HAVE ADDED content_type,object_id,content_object field, HERE CONTENT_TYPE WILL STORE THE django_content_type ID OF THE MODEL, OBJECT_ID WILL THE INSTANCE UNIQUE ID AND CONTENT OBJECT WE CAN GET THE REFERRED MODULE INSTANCE ITSELF.
+
+            comments = Comment.objects.first()
+            print(comments)     
+            print(comments.content_object.name)     - RESTAUTANY NAME
+            print(comments.content_type)            - CORE | RESTAURANT
+        
+            restaurant = Restaurant.objects.first()
+            c1 = Comment.objects.create(
+                text="This Restaurant special is MysorePark",
+                content_object=restaurant
+            )       - WE CAN ADD A COMMENT TO A RESTAURANT BY SPECIFYING ONLY THE CONTENT_OBJECT.
+
+            restaurant = Restaurant.objects.first()
+            print(restaurant.comments.all())
+            print(restaurant.comments.count())
+            restaurant.comments.add(
+                Comment.objects.create(text='Great Customer Service', content_object=restaurant)
+            )
+            comment = Comment.objects.filter(
+                restaurant__restaurant_type=Restaurant.TypeChoices.INDIAN)
+            print(comment)    - AFTER ADDING GENERIC RELATION AND RELATED_QUERY_NAME IN RESTAURANT AND IN RAITNG MODEL WE CAN ACCESS PARENT AND CHILD FIELD IN THIS WAY.
+    * CONSTRAINTS 
+        WE CAN ADD UNIQUE,NOT NULL, CHECK CONSTRAINT TO FIELDS OF A MODEL TO PREVENT IT FROM SAVING. 
+    

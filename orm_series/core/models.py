@@ -5,6 +5,8 @@ from django.core.exceptions import ValidationError
 from django.db.models.functions import Lower
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.db.models import Q, F
+from django.db.models.functions import Lower
 
 # Restaurant
 # Rating
@@ -38,6 +40,23 @@ class Restaurant(models.Model):
     class Meta():
         ordering = [Lower("name")]
         get_latest_by = "date_opened"
+        constraints = [
+            models.CheckConstraint(
+                name='latitude_check',
+                check=Q(latitude__gte=-90) & Q(latitude__lte=90),
+                violation_error_message="Invalid Latitude"
+            ),
+             models.CheckConstraint(
+                name='longitude_check',
+                check=Q(longitude__gte=-180) & Q(longitude__lte=180),
+                violation_error_message="Invalid longitude"
+            ),
+             models.UniqueConstraint(
+                 fields=['name','website'],
+                 name='name_website_uniqueu_check'
+             )
+            
+        ]
     
     def __str__(self):
         return f"Restaurant: {self.name}"
@@ -51,6 +70,15 @@ class Rating(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1),MaxValueValidator(5)])
     comments = GenericRelation("Comment", related_query_name="rating")
+    
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                name='rating_value_check',
+                check=Q(rating__gte=1,rating__lte=5),
+                violation_error_message="Invalid Rating Value"
+            )
+        ]
     
     def __str__(self):
         return f"Rating: {self.rating}"
